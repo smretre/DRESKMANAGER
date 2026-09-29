@@ -1,6 +1,6 @@
 import os
 import asyncio
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -25,11 +25,13 @@ app = FastAPI()
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- COMANDOS DO BOT DO TELEGRAM ---
+# Dicionário em memória para armazenar os bots dos clientes ativos
+active_client_bots = {}
+
+# --- COMANDOS DO BOT DO TELEGRAM (BOT PAI) ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     builder = InlineKeyboardBuilder()
-    # Adiciona o botão que abre o Painel Web App dentro do Telegram
     builder.button(
         text="📊 Abrir Painel de Gestão", 
         web_app=types.WebAppInfo(url=WEB_APP_URL)
@@ -47,7 +49,6 @@ async def cmd_start(message: types.Message):
 # --- ROTA WEB DO PAINEL (WEB APP) ---
 @app.get("/", response_class=HTMLResponse)
 async def dashboard_home():
-    # Aqui é o código HTML/CSS do seu painel visual (Web App)
     return """
     <!DOCTYPE html>
     <html lang="pt-BR">
@@ -88,7 +89,6 @@ async def dashboard_home():
                 font-size: 12px;
                 font-weight: bold;
             }
-            /* Navegação em abas */
             .tabs {
                 display: flex;
                 background: var(--card-bg);
@@ -113,7 +113,6 @@ async def dashboard_home():
                 background: var(--primary-color);
                 color: var(--button-text);
             }
-            /* Seções */
             .section { display: none; }
             .section.active { display: block; }
             
@@ -142,7 +141,6 @@ async def dashboard_home():
             .metric-box span { font-size: 12px; color: var(--hint-color); display: block; }
             .metric-box strong { font-size: 18px; margin-top: 4px; display: block; }
 
-            /* Formulários */
             .form-group { margin-bottom: 14px; }
             label { display: block; font-size: 13px; color: var(--hint-color); margin-bottom: 6px; }
             input, select {
@@ -194,14 +192,12 @@ async def dashboard_home():
             <div class="badge">SaaS Ativo 🚀</div>
         </header>
 
-        <!-- Abas de Navegação -->
         <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('dashboard')">📊 Visão Geral</button>
-            <button class="tab-btn" onclick="switchTab('bots')">🤖 Meus Bots</button>
-            <button class="tab-btn" onclick="switchTab('gateway')">💳 Gateways</button>
+            <button class="tab-btn active" onclick="switchTab('dashboard', this)">📊 Visão Geral</button>
+            <button class="tab-btn" onclick="switchTab('bots', this)">🤖 Meus Bots</button>
+            <button class="tab-btn" onclick="switchTab('gateway', this)">💳 Gateways</button>
         </div>
 
-        <!-- ABA 1: DASHBOARD -->
         <div id="dashboard" class="section active">
             <div class="metrics-grid">
                 <div class="metric-box">
@@ -230,7 +226,6 @@ async def dashboard_home():
             </div>
         </div>
 
-        <!-- ABA 2: MEUS BOTS -->
         <div id="bots" class="section">
             <div class="card">
                 <h3>🤖 Gerenciar Bot do Telegram</h3>
@@ -247,7 +242,6 @@ async def dashboard_home():
             </div>
         </div>
 
-        <!-- ABA 3: GATEWAYS DE PAGAMENTO -->
         <div id="gateway" class="section">
             <div class="card">
                 <h3>💳 Configurar Recebimento</h3>
@@ -283,93 +277,124 @@ async def dashboard_home():
         </div>
 
         <script>
-    let tg = window.Telegram.WebApp;
-    tg.expand();
+            let tg = window.Telegram.WebApp;
+            tg.expand();
 
-    // Dados do usuário logado no Telegram
-    let telegramUser = { id: 123456, first_name: "Usuário", username: "unknown" };
-    if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-        telegramUser = tg.initDataUnsafe.user;
-        document.getElementById('username-display').innerText = `Olá, ${telegramUser.first_name} (@${telegramUser.username || 'sem_user'})`;
-    }
+            let telegramUser = { id: 123456, first_name: "Usuário", username: "unknown" };
+            if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+                telegramUser = tg.initDataUnsafe.user;
+                document.getElementById('username-display').innerText = `Olá, ${telegramUser.first_name} (@${telegramUser.username || 'sem_user'})`;
+            }
 
-    // Alternar Abas
-    function switchTab(tabId, btnElement) {
-        document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
-        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-        
-        document.getElementById(tabId).classList.add('active');
-        btnElement.classList.add('active');
-    }
+            function switchTab(tabId, btnElement) {
+                document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
+                document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                
+                document.getElementById(tabId).classList.add('active');
+                btnElement.classList.add('active');
+            }
 
-    // Alternar campos do gateway dinamicamente
-    function mudarCamposGateway() {
-        let tipo = document.getElementById('gateway-type').value;
-        if (tipo === 'mercadopago') {
-            document.getElementById('campos-mercadopago').style.display = 'block';
-            document.getElementById('campos-pushinpay').style.display = 'none';
-        } else {
-            document.getElementById('campos-mercadopago').style.display = 'none';
-            document.getElementById('campos-pushinpay').style.display = 'block';
-        }
-    }
+            function mudarCamposGateway() {
+                let tipo = document.getElementById('gateway-type').value;
+                if (tipo === 'mercadopago') {
+                    document.getElementById('campos-mercadopago').style.display = 'block';
+                    document.getElementById('campos-pushinpay').style.display = 'none';
+                } else {
+                    document.getElementById('campos-mercadopago').style.display = 'none';
+                    document.getElementById('campos-pushinpay').style.display = 'block';
+                }
+            }
 
-    // Enviar Bot para o FastAPI
-    async function salvarBot(event) {
-        event.preventDefault();
-        let token = document.getElementById('bot-token').value;
+            async function salvarBot(event) {
+                event.preventDefault();
+                let token = document.getElementById('bot-token').value;
 
-        let response = await fetch('/api/salvar-bot', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: telegramUser.id, bot_token: token })
-        });
+                let response = await fetch('/api/salvar-bot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: telegramUser.id, bot_token: token })
+                });
 
-        if (response.ok) {
-            alert("Bot cadastrado e validado com sucesso!");
-        } else {
-            alert("Erro ao salvar o bot. Verifique o token.");
-        }
-    }
+                if (response.ok) {
+                    alert("Bot cadastrado e validado com sucesso!");
+                } else {
+                    alert("Erro ao salvar o bot. Verifique o token.");
+                }
+            }
 
-    // Enviar Gateway para o FastAPI
-    async function salvarGateway(event) {
-        event.preventDefault();
-        let tipo = document.getElementById('gateway-type').value;
-        let tokenGateway = tipo === 'mercadopago' ? document.getElementById('mp-token').value : document.getElementById('pushin-token').value;
+            async function salvarGateway(event) {
+                event.preventDefault();
+                let tipo = document.getElementById('gateway-type').value;
+                let tokenGateway = tipo === 'mercadopago' ? document.getElementById('mp-token').value : document.getElementById('pushin-token').value;
 
-        let response = await fetch('/api/salvar-gateway', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: telegramUser.id, gateway_type: tipo, token: tokenGateway })
-        });
+                let response = await fetch('/api/salvar-gateway', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: telegramUser.id, gateway_type: tipo, token: tokenGateway })
+                });
 
-        if (response.ok) {
-            alert("Credenciais de pagamento salvas com segurança!");
-        } else {
-            alert("Erro ao salvar credenciais.");
-        }
-    }
-</script>
+                if (response.ok) {
+                    alert("Credenciais de pagamento salvas com segurança!");
+                } else {
+                    alert("Erro ao salvar credenciais.");
+                }
+            }
+        </script>
     </body>
     </html>
     """
 
-# --- INICIALIZAÇÃO SIMULTÂNEA (WEB + BOT) ---
+# --- INICIALIZAÇÃO SIMULTÂNEA (WEB + BOT PAI) ---
 @app.on_event("startup")
 async def startup_event():
-    # Inicia o polling do bot em segundo plano junto com o FastAPI
     asyncio.create_task(dp.start_polling(bot))
 
-# 4. As rotas de API para salvar os dados (que vão receber o fetch do JavaScript)
+# --- ROTAS DE API PARA SALVAR DADOS E CONFIGURAR O BOT DO CLIENTE ---
 @app.post("/api/salvar-bot")
 async def api_salvar_bot(data: BotData):
-    print(f"Recebido Bot do usuário {data.user_id}: {data.bot_token}")
-    # Aqui depois você colocará a lógica para salvar no banco de dados e iniciar o bot
-    return {"status": "success", "message": "Bot salvo com sucesso"}
+    try:
+        # 1. Valida o token informando-se com a API do Telegram
+        temp_bot = Bot(token=data.bot_token)
+        bot_info = await temp_bot.get_me()
+        
+        # 2. Configura o Dispatcher dedicado para o bot do cliente
+        client_dp = Dispatcher()
+
+        @client_dp.message(Command("admin", "start"))
+        async def client_admin_menu(message: types.Message):
+            builder = InlineKeyboardBuilder()
+            builder.row(types.InlineKeyboardButton(text="💳 Gateways de pagamento", callback_data="cfg_gateways"))
+            builder.row(types.InlineKeyboardButton(text="🛒 Métodos de pagamento", callback_data="cfg_metodos"))
+            builder.row(types.InlineKeyboardButton(text="📦 Meus Produtos", callback_data="cfg_produtos"))
+            builder.row(types.InlineKeyboardButton(text="🏷️ Meus Cupons", callback_data="cfg_cupons"))
+            builder.row(types.InlineKeyboardButton(text="🛠️ Configurações", callback_data="cfg_config"))
+            builder.row(types.InlineKeyboardButton(text="❓ Ajuda e Suporte", callback_data="cfg_ajuda"))
+
+            user_name = message.from_user.first_name if message.from_user else "Administrador"
+
+            await message.answer(
+                f"⚙️ **Painel Administrador** ⚙️\n\n"
+                f"Status: **O bot está pronto para venda ✅**\n\n"
+                f"Olá, **{user_name}**!\n"
+                f"Aqui, você pode fazer todas as configurações do seu bot, desde a gestão de grupos e planos até a personalização de mensagens e opções de pagamento. "
+                f"Transforme a experiência dos seus usuários e alcance novos patamares de eficiência e sucesso!\n\n"
+                f"💡 Você pode voltar para esse menu a qualquer momento digitando `/admin`.",
+                reply_markup=builder.as_markup(),
+                parse_mode="Markdown"
+            )
+
+        # 3. Inicia o polling do bot do cliente em segundo plano de forma isolada
+        asyncio.create_task(client_dp.start_polling(temp_bot))
+        active_client_bots[data.user_id] = data.bot_token
+
+        print(f"Bot @{bot_info.username} do usuário {data.user_id} iniciado com sucesso!")
+        return {"status": "success", "message": f"Bot @{bot_info.username} conectado com sucesso!"}
+
+    except Exception as e:
+        print(f"Erro ao validar bot: {e}")
+        raise HTTPException(status_code=400, detail="Token inválido ou erro ao conectar.")
 
 @app.post("/api/salvar-gateway")
 async def api_salvar_gateway(data: GatewayData):
     print(f"Recebido Gateway {data.gateway_type} do usuário {data.user_id}")
-    # Aqui depois você salvará as chaves do Mercado Pago ou Pushin Pay com segurança
     return {"status": "success", "message": "Gateway salvo com sucesso"}
