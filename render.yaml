@@ -2,7 +2,6 @@ services:
   - type: web
     name: bot-manager-telegram
     runtime: python
-    pythonVersion: 3.10.13
     region: oregon
     plan: free
     buildCommand: pip install -r requirements.txt
