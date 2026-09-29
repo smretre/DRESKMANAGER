@@ -360,8 +360,24 @@ async def api_salvar_bot(data: BotData):
         # 2. Configura o Dispatcher dedicado para o bot do cliente
         client_dp = Dispatcher()
 
-        @client_dp.message(Command("admin", "start"))
+        # Configura a lista de comandos nativa no menu lateral do Telegram
+        await temp_bot.set_my_commands([
+            types.BotCommand(command="admin", description="⚙️ Painel Administrador"),
+            types.BotCommand(command="start", description="🚀 Começar"),
+            types.BotCommand(command="meus_acessos", description="🔗 Meus acessos"),
+            types.BotCommand(command="suporte", description="💬 Suporte"),
+            types.BotCommand(command="sobre", description="❓ Sobre")
+        ])
+
+        owner_id = data.user_id
+
+        @client_dp.message(Command("admin"))
         async def client_admin_menu(message: types.Message):
+            # Trava de segurança: impede que clientes comuns abram o painel de gestão
+            if message.from_user.id != owner_id:
+                await message.answer("⚠️ Este comando é restrito apenas ao administrador/dono deste bot.")
+                return
+
             builder = InlineKeyboardBuilder()
             builder.row(types.InlineKeyboardButton(text="💳 Gateways de pagamento", callback_data="cfg_gateways"))
             builder.row(types.InlineKeyboardButton(text="🛒 Métodos de pagamento", callback_data="cfg_metodos"))
@@ -382,6 +398,29 @@ async def api_salvar_bot(data: BotData):
                 reply_markup=builder.as_markup(),
                 parse_mode="Markdown"
             )
+
+        @client_dp.message(Command("start"))
+        async def client_start(message: types.Message):
+            if message.from_user.id == owner_id:
+                await message.answer("👋 Olá Dono! Utilize o comando `/admin` para gerenciar as configurações do seu bot.")
+            else:
+                await message.answer("👋 **Bem-vindo à nossa loja!**\n\nConfira os nossos produtos disponíveis para compra.", parse_mode="Markdown")
+
+        @client_dp.message(Command("sobre"))
+        async def client_sobre(message: types.Message):
+            await message.answer(
+                "Este bot foi criado com o **Bot Manager**, uma plataforma que permite que qualquer "
+                "pessoa crie seu próprio bot personalizado e gerencie seus grupos e canais no Telegram. 🚀",
+                parse_mode="Markdown"
+            )
+
+        @client_dp.message(Command("suporte"))
+        async def client_suporte(message: types.Message):
+            await message.answer("💬 Para dúvidas e suporte, utilize os nossos canais oficiais de atendimento.", parse_mode="Markdown")
+
+        @client_dp.message(Command("meus_acessos"))
+        async def client_meus_acessos(message: types.Message):
+            await message.answer("🔗 Aqui estão os seus acessos ativos e assinaturas vinculadas.", parse_mode="Markdown")
 
         # 3. Inicia o polling do bot do cliente em segundo plano de forma isolada
         asyncio.create_task(client_dp.start_polling(temp_bot))
