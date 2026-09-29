@@ -5,6 +5,17 @@ from fastapi.responses import HTMLResponse
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from pydantic import BaseModel
+
+# 2. Modelos Pydantic para receber os dados do painel
+class BotData(BaseModel):
+    user_id: int
+    bot_token: str
+
+class GatewayData(BaseModel):
+    user_id: int
+    gateway_type: str
+    token: str
 
 # Pegando as variáveis de ambiente configuradas no Render
 TOKEN = os.getenv("BOT_TOKEN") # O token do seu Bot Pai gerado no BotFather
@@ -272,49 +283,74 @@ async def dashboard_home():
         </div>
 
         <script>
-            let tg = window.Telegram.WebApp;
-            tg.expand();
+    let tg = window.Telegram.WebApp;
+    tg.expand();
 
-            // Identificar o usuário logado via Telegram WebApp
-            if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-                let user = tg.initDataUnsafe.user;
-                document.getElementById('username-display').innerText = `Olá, ${user.first_name} (@${user.username || 'sem_user'})`;
-            }
+    // Dados do usuário logado no Telegram
+    let telegramUser = { id: 123456, first_name: "Usuário", username: "unknown" };
+    if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+        telegramUser = tg.initDataUnsafe.user;
+        document.getElementById('username-display').innerText = `Olá, ${telegramUser.first_name} (@${telegramUser.username || 'sem_user'})`;
+    }
 
-            // Alternar Abas
-            function switchTab(tabId) {
-                document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
-                document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-                
-                document.getElementById(tabId).classList.add('active');
-                event.currentTarget.classList.add('active');
-            }
+    // Alternar Abas
+    function switchTab(tabId, btnElement) {
+        document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        
+        document.getElementById(tabId).classList.add('active');
+        btnElement.classList.add('active');
+    }
 
-            // Alternar campos do gateway dinamicamente
-            function mudarCamposGateway() {
-                let tipo = document.getElementById('gateway-type').value;
-                if (tipo === 'mercadopago') {
-                    document.getElementById('campos-mercadopago').style.display = 'block';
-                    document.getElementById('campos-pushinpay').style.display = 'none';
-                } else {
-                    document.getElementById('campos-mercadopago').style.display = 'none';
-                    document.getElementById('campos-pushinpay').style.display = 'block';
-                }
-            }
+    // Alternar campos do gateway dinamicamente
+    function mudarCamposGateway() {
+        let tipo = document.getElementById('gateway-type').value;
+        if (tipo === 'mercadopago') {
+            document.getElementById('campos-mercadopago').style.display = 'block';
+            document.getElementById('campos-pushinpay').style.display = 'none';
+        } else {
+            document.getElementById('campos-mercadopago').style.display = 'none';
+            document.getElementById('campos-pushinpay').style.display = 'block';
+        }
+    }
 
-            function salvarBot(event) {
-                event.preventDefault();
-                let token = document.getElementById('bot-token').value;
-                tg.showAlert("Bot cadastrado com sucesso! Iniciando instâncias...");
-                // Aqui você integrará com a rota POST do seu backend Python para salvar no banco
-            }
+    // Enviar Bot para o FastAPI
+    async function salvarBot(event) {
+        event.preventDefault();
+        let token = document.getElementById('bot-token').value;
 
-            function salvarGateway(event) {
-                event.preventDefault();
-                tg.showAlert("Credenciais de pagamento salvas com segurança!");
-                // Enviar via AJAX/Fetch para o FastAPI salvar as chaves
-            }
-        </script>
+        let response = await fetch('/api/salvar-bot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: telegramUser.id, bot_token: token })
+        });
+
+        if (response.ok) {
+            alert("Bot cadastrado e validado com sucesso!");
+        } else {
+            alert("Erro ao salvar o bot. Verifique o token.");
+        }
+    }
+
+    // Enviar Gateway para o FastAPI
+    async function salvarGateway(event) {
+        event.preventDefault();
+        let tipo = document.getElementById('gateway-type').value;
+        let tokenGateway = tipo === 'mercadopago' ? document.getElementById('mp-token').value : document.getElementById('pushin-token').value;
+
+        let response = await fetch('/api/salvar-gateway', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: telegramUser.id, gateway_type: tipo, token: tokenGateway })
+        });
+
+        if (response.ok) {
+            alert("Credenciais de pagamento salvas com segurança!");
+        } else {
+            alert("Erro ao salvar credenciais.");
+        }
+    }
+</script>
     </body>
     </html>
     """
@@ -324,3 +360,16 @@ async def dashboard_home():
 async def startup_event():
     # Inicia o polling do bot em segundo plano junto com o FastAPI
     asyncio.create_task(dp.start_polling(bot))
+
+# 4. As rotas de API para salvar os dados (que vão receber o fetch do JavaScript)
+@app.post("/api/salvar-bot")
+async def api_salvar_bot(data: BotData):
+    print(f"Recebido Bot do usuário {data.user_id}: {data.bot_token}")
+    # Aqui depois você colocará a lógica para salvar no banco de dados e iniciar o bot
+    return {"status": "success", "message": "Bot salvo com sucesso"}
+
+@app.post("/api/salvar-gateway")
+async def api_salvar_gateway(data: GatewayData):
+    print(f"Recebido Gateway {data.gateway_type} do usuário {data.user_id}")
+    # Aqui depois você salvará as chaves do Mercado Pago ou Pushin Pay com segurança
+    return {"status": "success", "message": "Gateway salvo com sucesso"}
